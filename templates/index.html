@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rover Controller</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 10px;
+      text-align: center;
+      user-select: none;
+      background-color: #121212;
+      color: #e0e0e0;
+      max-width: 100vw;
+      overflow-x: hidden;
+    }
+
+    #connection-controls {
+      margin-bottom: 20px;
+    }
+
+    button {
+      font-size: 24px;
+      border-radius: 8px;
+      width: 80px;
+      height: 80px;
+      margin: 8px;
+      background-color: #333;
+      color: #eee;
+      border: 2px solid #555;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.6);
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    button:hover,
+    button:focus {
+      background-color: #555;
+      color: #fff;
+      outline: none;
+    }
+
+    #status {
+      font-weight: bold;
+      margin-bottom: 20px;
+      color: #bbb;
+    }
+
+    #control-pad {
+      display: inline-grid;
+      grid-template-columns: 80px 80px 80px;
+      gap: 8px;
+      justify-content: center;
+      margin: 0 auto;
+    }
+
+    #btn-w { grid-column: 2 / 3; grid-row: 1 / 2; }
+    #btn-a { grid-column: 1 / 2; grid-row: 2 / 3; }
+    #btn-s { grid-column: 2 / 3; grid-row: 3 / 4; }
+    #btn-d { grid-column: 3 / 4; grid-row: 2 / 3; }
+
+    @media (max-width: 600px) {
+      button {
+        width: 60px;
+        height: 60px;
+        font-size: 20px;
+        margin: 6px;
+      }
+      #control-pad {
+        grid-template-columns: repeat(3, 60px);
+        gap: 6px;
+      }
+    }
+
+    h1 {
+      font-size: 1.5rem;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Rover Controller</h1>
+
+  <div id="connection-controls">
+    <button id="connectBtn" style="width: 150px;">Connect</button>
+    <button id="disconnectBtn" style="width: 150px;">Disconnect</button>
+  </div>
+
+  <div id="status">Status: Disconnected</div>
+
+  <img src='http://192.168.1.175/stream' style='max-width:100%;'/>
+
+  <div id="control-pad" tabindex="0">
+    <button id="btn-w">W</button>
+    <button id="btn-a">A</button>
+    <button id="btn-s">S</button>
+    <button id="btn-d">D</button>
+  </div>
+
+  <script>
+    let lastCommand = null;
+    let isConnected = false;
+    const keysDown = new Set();
+
+    function updateStatus(msg) {
+      document.getElementById("status").innerText = "Status: " + msg;
+    }
+
+    async function sendCommand(cmd) {
+      if (!isConnected) {
+        updateStatus("Not connected");
+        return;
+      }
+      if (cmd === lastCommand) return;
+      lastCommand = cmd;
+
+      try {
+        const res = await fetch("/command", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command: cmd }),
+        });
+        const data = await res.json();
+        updateStatus(data.status === "sent" ? `Command '${cmd}' sent` : `Failed to send '${cmd}'`);
+      } catch {
+        updateStatus("Error sending command");
+      }
+    }
+
+    async function connect() {
+      await fetch("/connect", { method: "POST" });
+      updateStatus("Connecting...");
+      isConnected = true;
+      setTimeout(() => updateStatus("Connected"), 1000);
+    }
+
+    async function disconnect() {
+      await fetch("/disconnect", { method: "POST" });
+      updateStatus("Disconnected");
+      isConnected = false;
+      lastCommand = null;
+    }
+
+    document.getElementById("connectBtn").addEventListener("click", connect);
+    document.getElementById("disconnectBtn").addEventListener("click", disconnect);
+
+    function getCommandFromKeys() {
+      const w = keysDown.has("w");
+      const a = keysDown.has("a");
+      const s = keysDown.has("s");
+      const d = keysDown.has("d");
+      if (w && a) return "wa";
+      if (w && d) return "wd";
+      if (s && a) return "sa";
+      if (s && d) return "sd";
+      if (a) return "wa";
+      if (d) return "wd";
+      if (w) return "w";
+      if (s) return "s";
+      return "x";
+    }
+
+    function handleKeyDown(key) {
+      if (!keysDown.has(key)) {
+        keysDown.add(key);
+        sendCommand(getCommandFromKeys());
+      }
+    }
+
+    function handleKeyUp(key) {
+      if (keysDown.has(key)) {
+        keysDown.delete(key);
+        sendCommand(getCommandFromKeys());
+      }
+    }
+
+    window.addEventListener("keydown", (e) => {
+      const key = e.key.toLowerCase();
+      if (["w", "a", "s", "d"].includes(key)) {
+        e.preventDefault();
+        handleKeyDown(key);
+      }
+    });
+
+    window.addEventListener("keyup", (e) => {
+      const key = e.key.toLowerCase();
+      if (["w", "a", "s", "d"].includes(key)) {
+        e.preventDefault();
+        handleKeyUp(key);
+      }
+    });
+
+    function addButtonControls(btn, keyName) {
+      btn.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        handleKeyDown(keyName);
+      });
+      btn.addEventListener("touchend", (e) => {
+        e.preventDefault();
+        handleKeyUp(keyName);
+      });
+      btn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        handleKeyDown(keyName);
+      });
+      btn.addEventListener("mouseup", (e) => {
+        e.preventDefault();
+        handleKeyUp(keyName);
+      });
+      btn.addEventListener("mouseleave", () => {
+        if (keysDown.has(keyName)) handleKeyUp(keyName);
+      });
+    }
+
+    addButtonControls(document.getElementById("btn-w"), "w");
+    addButtonControls(document.getElementById("btn-a"), "a");
+    addButtonControls(document.getElementById("btn-s"), "s");
+    addButtonControls(document.getElementById("btn-d"), "d");
+
+    function isMobileDevice() {
+      return (
+        "ontouchstart" in window ||
+        navigator.maxTouchPoints > 0 ||
+        /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+      );
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      const controlPad = document.getElementById("control-pad");
+      controlPad.style.display = isMobileDevice() ? "inline-grid" : "none";
+    });
+  </script>
+</body>
+</html>
